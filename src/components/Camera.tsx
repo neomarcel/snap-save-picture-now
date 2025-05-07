@@ -11,8 +11,18 @@ const Camera = () => {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [deviceOrientation, setDeviceOrientation] = useState<number>(0);
   const [deviceRotation, setDeviceRotation] = useState<number>(0);
+  const [isIOS, setIsIOS] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Detect iOS
+  useEffect(() => {
+    // iOS detection using userAgent
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && 
+                        !(window as any).MSStream;
+    setIsIOS(isIOSDevice);
+    console.log("Detected iOS device:", isIOSDevice);
+  }, []);
 
   // Track screen orientation
   useEffect(() => {
@@ -23,6 +33,7 @@ const Camera = () => {
         : window.orientation || 0;
       
       setDeviceOrientation(orientation);
+      console.log("Screen orientation:", orientation);
     };
 
     // Set initial orientation
@@ -47,26 +58,48 @@ const Camera = () => {
   useEffect(() => {
     // Handle device orientation event
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      // On iOS, we need to request permission for DeviceOrientation events
+      if (isIOS && event.alpha === null && event.beta === null && event.gamma === null) {
+        console.log("No orientation data available - may need permission on iOS");
+        return;
+      }
+      
       // Beta value represents front-to-back tilt in degrees, where front is positive
       // Gamma value represents left-to-right tilt in degrees, where right is positive
       const { beta, gamma } = event;
       
       if (beta === null || gamma === null) return;
       
+      console.log("Device orientation data:", { beta, gamma });
+      
       // Determine device rotation based on beta and gamma values
       let rotation = 0;
       
-      // Portrait mode (normal holding position)
-      if (Math.abs(gamma!) < 45) {
-        if (beta! > 45) rotation = 0; // normal portrait
-        else if (beta! < -45) rotation = 180; // upside down portrait
-      }
-      // Landscape mode
-      else {
-        if (gamma! > 45) rotation = 90; // landscape right
-        else if (gamma! < -45) rotation = 270; // landscape left
+      // For iOS, we need different orientation detection logic
+      if (isIOS) {
+        // iOS-specific orientation detection
+        if (Math.abs(gamma!) > 45) {
+          // Device is in landscape
+          rotation = gamma! > 0 ? 90 : -90;
+        } else {
+          // Device is in portrait
+          rotation = beta! < 0 ? 180 : 0;
+        }
+      } else {
+        // Android orientation detection (existing logic)
+        // Portrait mode (normal holding position)
+        if (Math.abs(gamma!) < 45) {
+          if (beta! > 45) rotation = 0; // normal portrait
+          else if (beta! < -45) rotation = 180; // upside down portrait
+        }
+        // Landscape mode
+        else {
+          if (gamma! > 45) rotation = 90; // landscape right
+          else if (gamma! < -45) rotation = 270; // landscape left
+        }
       }
       
+      console.log("Calculated device rotation:", rotation);
       setDeviceRotation(rotation);
     };
 
@@ -76,7 +109,7 @@ const Camera = () => {
     return () => {
       window.removeEventListener('deviceorientation', handleDeviceOrientation);
     };
-  }, []);
+  }, [isIOS]);
 
   const requestCameraPermission = async () => {
     try {
@@ -172,8 +205,22 @@ const Camera = () => {
       
       if (!ctx) return;
       
+      // Log the orientation values we'll use for debugging
+      console.log("Saving with orientation data:", {
+        deviceRotation,
+        deviceOrientation,
+        isIOS
+      });
+      
       // Use deviceRotation from motion sensors first, fall back to screen orientation if needed
-      const actualRotation = deviceRotation || deviceOrientation;
+      let actualRotation = deviceRotation;
+      
+      // For iOS devices, we need special handling
+      if (isIOS) {
+        // Normalize iOS rotation values
+        if (actualRotation === -90) actualRotation = 270;
+        console.log("iOS normalized rotation:", actualRotation);
+      }
       
       // Apply rotation based on device orientation
       let width = img.width;
