@@ -10,12 +10,13 @@ const Camera = () => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [deviceOrientation, setDeviceOrientation] = useState<number>(0);
+  const [deviceRotation, setDeviceRotation] = useState<number>(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Track device orientation
+  // Track screen orientation
   useEffect(() => {
-    const handleOrientation = () => {
+    const handleScreenOrientation = () => {
       // Get screen orientation in degrees (0, 90, 180, or 270)
       const orientation = window.screen.orientation 
         ? window.screen.orientation.angle 
@@ -25,20 +26,55 @@ const Camera = () => {
     };
 
     // Set initial orientation
-    handleOrientation();
+    handleScreenOrientation();
     
     // Listen for orientation changes
-    window.addEventListener('orientationchange', handleOrientation);
+    window.addEventListener('orientationchange', handleScreenOrientation);
     
     if (window.screen.orientation) {
-      window.screen.orientation.addEventListener('change', handleOrientation);
+      window.screen.orientation.addEventListener('change', handleScreenOrientation);
     }
     
     return () => {
-      window.removeEventListener('orientationchange', handleOrientation);
+      window.removeEventListener('orientationchange', handleScreenOrientation);
       if (window.screen.orientation) {
-        window.screen.orientation.removeEventListener('change', handleOrientation);
+        window.screen.orientation.removeEventListener('change', handleScreenOrientation);
       }
+    };
+  }, []);
+
+  // Track actual device orientation using device motion sensors
+  useEffect(() => {
+    // Handle device orientation event
+    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      // Beta value represents front-to-back tilt in degrees, where front is positive
+      // Gamma value represents left-to-right tilt in degrees, where right is positive
+      const { beta, gamma } = event;
+      
+      if (beta === null || gamma === null) return;
+      
+      // Determine device rotation based on beta and gamma values
+      let rotation = 0;
+      
+      // Portrait mode (normal holding position)
+      if (Math.abs(gamma!) < 45) {
+        if (beta! > 45) rotation = 0; // normal portrait
+        else if (beta! < -45) rotation = 180; // upside down portrait
+      }
+      // Landscape mode
+      else {
+        if (gamma! > 45) rotation = 90; // landscape right
+        else if (gamma! < -45) rotation = 270; // landscape left
+      }
+      
+      setDeviceRotation(rotation);
+    };
+
+    // Add event listener for device orientation
+    window.addEventListener('deviceorientation', handleDeviceOrientation);
+    
+    return () => {
+      window.removeEventListener('deviceorientation', handleDeviceOrientation);
     };
   }, []);
 
@@ -106,6 +142,8 @@ const Camera = () => {
         
         // Store the orientation with the image
         const imageDataUrl = canvas.toDataURL('image/jpeg');
+        
+        // Store the captured image along with the current device orientation data
         setCapturedImage(imageDataUrl);
         stopCamera();
         toast({
@@ -134,20 +172,38 @@ const Camera = () => {
       
       if (!ctx) return;
       
+      // Use deviceRotation from motion sensors first, fall back to screen orientation if needed
+      const actualRotation = deviceRotation || deviceOrientation;
+      
       // Apply rotation based on device orientation
       let width = img.width;
       let height = img.height;
       
-      // If in landscape mode, swap dimensions
-      if (deviceOrientation === 90 || deviceOrientation === -90 || deviceOrientation === 270) {
+      if (actualRotation === 90 || actualRotation === 270) {
+        // For landscape orientations, swap dimensions
         canvas.width = height;
         canvas.height = width;
         
-        // Translate and rotate canvas context
+        ctx.save();
+        // Move to the center of the canvas
         ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((deviceOrientation * Math.PI) / 180);
+        // Rotate based on the determined rotation
+        ctx.rotate((actualRotation * Math.PI) / 180);
+        // Draw the image, accounting for the rotation
         ctx.drawImage(img, -width / 2, -height / 2, width, height);
+        ctx.restore();
+      } else if (actualRotation === 180) {
+        // For upside down portrait
+        canvas.width = width;
+        canvas.height = height;
+        
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(Math.PI); // 180 degrees in radians
+        ctx.drawImage(img, -width / 2, -height / 2, width, height);
+        ctx.restore();
       } else {
+        // Normal portrait orientation (0 degrees)
         canvas.width = width;
         canvas.height = height;
         ctx.drawImage(img, 0, 0, width, height);
